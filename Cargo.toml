@@ -1,0 +1,47 @@
+[package]
+name = "mlgraph"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.85"
+authors = ["Santh Project <contact@santh.dev>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://santh.dev"
+repository = "https://github.com/santhreal/mlgraph"
+description = "Bandwidth-aware computation graph optimizer for ML inference  -  fuses transformer layers to minimize HBM traffic"
+readme = "README.md"
+keywords = [ "ml", "graph", "fusion", "optimizer" ]
+categories = ["science", "algorithms", "data-structures"]
+
+
+[package.metadata.santh]
+status = "alpha"
+[dependencies]
+thiserror = "=2.0.18"
+tracing = "=0.1.44"
+
+[dev-dependencies]
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+proptest = "=1.9.0"
+
+[[example]]
+name = "vit_optimize"
+path = "examples/vit_optimize.rs"
+
+[[test]]
+name = "concurrent"
+path = "tests/concurrent/mod.rs"
+
+[[test]]
+name = "adversarial"
+path = "tests/adversarial/mod.rs"
+
+[[test]]
+name = "property"
+path = "tests/property/mod.rs"
+
+[[test]]
+name = "gap_graph_optimizer"
+path = "tests/gap/graph_optimizer_gap.rs"
+
+[lints.rust]
+missing_docs = "warn"
