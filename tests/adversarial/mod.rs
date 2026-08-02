@@ -13,3 +13,5 @@ pub mod graph_limits;
 pub mod io_oom;
 /// Adversarial Ops checks
 pub mod ops;
+/// Corrupted-topology checks (cycles, dangling refs, hostile fusion mappings)
+pub mod corruption;

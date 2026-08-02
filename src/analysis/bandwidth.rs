@@ -68,6 +68,22 @@ impl AnalysisPass for BandwidthAnalysis {
 
     fn analyze(&self, graph: &Graph) -> Result<BandwidthReport> {
         let order = graph.topological_order();
+
+        // A topological walk that visits fewer nodes than the graph contains
+        // means the walk stalled on a cycle. Reporting bandwidth for only the
+        // reachable prefix would silently under-count traffic, so refuse the
+        // whole analysis instead.
+        if order.len() != graph.num_nodes() {
+            return Err(crate::error::Error::InvalidGraph {
+                reason: format!(
+                    "graph contains a cycle: topological order visited {} of {} nodes. \
+                     Fix: remove the cyclic edge before running analysis.",
+                    order.len(),
+                    graph.num_nodes()
+                ),
+            });
+        }
+
         let mut nodes = Vec::with_capacity(order.len());
         let mut total_read = 0_u64;
         let mut total_write = 0_u64;
@@ -78,16 +94,36 @@ impl AnalysisPass for BandwidthAnalysis {
                 continue;
             };
 
+            // Dangling tensor references (e.g. left behind by `remove_node`
+            // on a still-consumed producer) must fail loudly: shape lookup by
+            // position matters, so dropping a missing input would compute
+            // traffic from the wrong shape list with no signal.
             let input_shapes: Vec<Vec<usize>> = node
                 .inputs()
                 .iter()
-                .filter_map(|tid| graph.tensor(*tid).map(|t| t.shape().to_vec()))
-                .collect();
+                .map(|tid| {
+                    graph
+                        .tensor(*tid)
+                        .map(|t| t.shape().to_vec())
+                        .ok_or(crate::error::Error::UnknownId {
+                            kind: "tensor",
+                            id: tid.0,
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
             let output_shapes: Vec<Vec<usize>> = node
                 .outputs()
                 .iter()
-                .filter_map(|tid| graph.tensor(*tid).map(|t| t.shape().to_vec()))
-                .collect();
+                .map(|tid| {
+                    graph
+                        .tensor(*tid)
+                        .map(|t| t.shape().to_vec())
+                        .ok_or(crate::error::Error::UnknownId {
+                            kind: "tensor",
+                            id: tid.0,
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
 
             let input_refs: Vec<&[usize]> = input_shapes.iter().map(Vec::as_slice).collect();
             let output_refs: Vec<&[usize]> = output_shapes.iter().map(Vec::as_slice).collect();

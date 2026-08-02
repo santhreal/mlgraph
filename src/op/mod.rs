@@ -374,10 +374,6 @@ impl Op {
     }
 }
 
-pub(crate) fn elements(shape: &[usize]) -> u64 {
-    shape.iter().map(|&d| d as u64).product()
-}
-
 /// Normalize a possibly-negative axis (numpy/PyTorch convention: -1 == last)
 /// against a tensor rank, returning `None` when it falls outside `[-rank, rank)`.
 pub(crate) fn normalize_axis(axis: isize, rank: usize) -> Option<usize> {
