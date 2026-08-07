@@ -29,6 +29,10 @@ impl TensorMeta {
     pub fn dtype(&self) -> DType {
         self.dtype
     }
+    /// Set the data type of this tensor.
+    pub fn set_dtype(&mut self, dtype: DType) {
+        self.dtype = dtype;
+    }
 
     /// Total number of elements in the tensor.
     pub fn elements(&self) -> u64 {

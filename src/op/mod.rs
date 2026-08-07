@@ -257,6 +257,12 @@ impl Op {
                     op_name: self.name().to_string(),
                     reason: format!("split dim {dim} out of range for rank {}", a.len()),
                 })?;
+                if sections.is_empty() {
+                    return Err(Error::ShapeMismatch {
+                        op_name: self.name().to_string(),
+                        reason: "split sections cannot be empty".to_string(),
+                    });
+                }
                 let sections_sum: usize = sections.iter().copied().fold(0usize, usize::saturating_add);
                 if sections_sum != a[axis] {
                     return Err(Error::ShapeMismatch {

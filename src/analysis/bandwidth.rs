@@ -90,9 +90,12 @@ impl AnalysisPass for BandwidthAnalysis {
         let mut total_flops = 0_u64;
 
         for nid in &order {
-            let Some(node) = graph.node_by_id(*nid) else {
-                continue;
-            };
+            let node = graph
+                .node_by_id(*nid)
+                .ok_or(crate::error::Error::UnknownId {
+                    kind: "node",
+                    id: nid.0,
+                })?;
 
             // Dangling tensor references (e.g. left behind by `remove_node`
             // on a still-consumed producer) must fail loudly: shape lookup by
@@ -129,18 +132,25 @@ impl AnalysisPass for BandwidthAnalysis {
             let output_refs: Vec<&[usize]> = output_shapes.iter().map(Vec::as_slice).collect();
 
             // Use the dtype of the first input tensor (or F16 as default).
-            let dtype = node
+            let in_dtype = node
                 .inputs()
                 .first()
                 .and_then(|tid| graph.tensor(*tid))
                 .map_or(crate::dtype::DType::F16, crate::graph::TensorMeta::dtype);
+            let out_dtype = node
+                .outputs()
+                .first()
+                .and_then(|tid| graph.tensor(*tid))
+                .map_or(in_dtype, crate::graph::TensorMeta::dtype);
 
-            let hbm_read = node.op().hbm_bytes_read(&input_refs, dtype);
-            let hbm_write = node.op().hbm_bytes_written(&output_refs, dtype);
+            let hbm_read = node.op().hbm_bytes_read(&input_refs, in_dtype);
+            let hbm_write = node.op().hbm_bytes_written(&output_refs, out_dtype);
             let flops = node.op().flops(&input_refs, &output_refs);
             let hbm_total = hbm_read.saturating_add(hbm_write);
             let arithmetic_intensity = if hbm_total > 0 {
                 flops as f64 / hbm_total as f64
+            } else if flops > 0 {
+                f64::INFINITY
             } else {
                 0.0
             };
@@ -165,6 +175,8 @@ impl AnalysisPass for BandwidthAnalysis {
         let total_traffic = total_read.saturating_add(total_write);
         let arithmetic_intensity = if total_traffic > 0 {
             total_flops as f64 / total_traffic as f64
+        } else if total_flops > 0 {
+            f64::INFINITY
         } else {
             0.0
         };
@@ -209,12 +221,12 @@ fn format_flops(flops: u64) -> String {
 }
 
 fn classify_intensity(intensity: f64) -> &'static str {
-    if intensity < 1.0 {
-        "bandwidth-bound"
-    } else if intensity < 10.0 {
-        "transitional"
-    } else {
+    if intensity.is_infinite() || intensity >= 10.0 {
         "compute-bound"
+    } else if intensity < 1.0 {
+        "bandwidth-bound"
+    } else {
+        "transitional"
     }
 }
 
