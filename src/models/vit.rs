@@ -114,8 +114,41 @@ impl ViTConfig {
 ///
 /// Returns an error if shape inference fails during graph construction.
 pub fn build_vit(config: &ViTConfig) -> Result<Graph> {
+    if config.patch_size == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "patch_size must be > 0".to_string() });
+    }
+    if config.in_channels == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "in_channels must be > 0".to_string() });
+    }
+    if config.hidden_dim == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "hidden_dim must be > 0".to_string() });
+    }
+    if config.num_heads == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "num_heads must be > 0".to_string() });
+    }
+    if config.hidden_dim % config.num_heads != 0 {
+        return Err(crate::error::Error::InvalidGraph {
+            reason: format!("hidden_dim ({}) must be divisible by num_heads ({})", config.hidden_dim, config.num_heads),
+        });
+    }
+    if config.image_size % config.patch_size != 0 {
+        return Err(crate::error::Error::InvalidGraph {
+            reason: format!("image_size ({}) must be divisible by patch_size ({})", config.image_size, config.patch_size),
+        });
+    }
+    if config.batch_size == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "batch_size must be > 0".to_string() });
+    }
+    if config.mlp_dim == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "mlp_dim must be > 0".to_string() });
+    }
+    if config.num_layers == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "num_layers must be > 0".to_string() });
+    }
+    if config.num_classes == 0 {
+        return Err(crate::error::Error::InvalidGraph { reason: "num_classes must be > 0".to_string() });
+    }
     let mut g = Graph::new(&config.name);
-
     // Input image.
     let image = g.input(
         "image",

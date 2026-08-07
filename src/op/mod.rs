@@ -200,6 +200,9 @@ impl Op {
                 Ok(vec![out_shape])
             },
             Op::Transpose { perm } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
                 let a = input_shapes[0];
                 if perm.len() != a.len() {
                     return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "permutation length mismatch".to_string() });
@@ -220,10 +223,16 @@ impl Op {
                 }
                 Ok(vec![out_shape])
             },
-            Op::PatchEmbed { patch_size, embed_dim, .. } => {
+            Op::PatchEmbed { patch_size, in_channels, embed_dim } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
                 let a = input_shapes[0];
                 if a.len() < 4 {
                     return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "PatchEmbed requires rank 4 input".to_string() });
+                }
+                if *in_channels > 0 && a[1] != *in_channels {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("input channel size {} != in_channels {}", a[1], in_channels) });
                 }
                 let b = a[0];
                 let h = a[2];
@@ -236,15 +245,17 @@ impl Op {
                 Ok(vec![vec![b, s, *embed_dim]])
             }
             Op::Linear { out_features, .. } => {
-                // A dense layer maps the last dimension (in_features) to out_features
-                // and leaves the leading (batch/sequence) dimensions unchanged.
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
+                if *out_features == 0 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "out_features must be > 0".to_string() });
+                }
                 let a = input_shapes[0];
                 if a.is_empty() {
                     return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "Linear requires a rank >= 1 input".to_string() });
                 }
                 let mut out = a.to_vec();
-                // Rank is checked non-empty above; let-else keeps this
-                // panic-free (the crate denies `expect`).
                 let Some(last) = out.last_mut() else {
                     return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "Linear requires a rank >= 1 input".to_string() });
                 };
@@ -252,6 +263,9 @@ impl Op {
                 Ok(vec![out])
             }
             Op::Split { dim, sections } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
                 let a = input_shapes[0];
                 let axis = normalize_axis(*dim, a.len()).ok_or_else(|| Error::ShapeMismatch {
                     op_name: self.name().to_string(),
@@ -301,6 +315,9 @@ impl Op {
                 Ok(vec![out])
             }
             Op::Reshape { target } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
                 let a = input_shapes[0];
                 let total: usize = a.iter().copied().fold(1usize, usize::saturating_mul);
                 let mut known: usize = 1;
@@ -357,9 +374,80 @@ impl Op {
                 }
                 Ok(vec![a.to_vec()])
             }
-            _ => {
-                // Default to first input shape
+            Op::Softmax { dim } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
+                let a = input_shapes[0];
+                let _axis = normalize_axis(*dim, a.len()).ok_or_else(|| Error::ShapeMismatch {
+                    op_name: self.name().to_string(),
+                    reason: format!("softmax dim {dim} out of range for rank {}", a.len()),
+                })?;
+                Ok(vec![a.to_vec()])
+            }
+            Op::LayerNorm { eps } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "expected 1 input".to_string() });
+                }
+                let a = input_shapes[0];
+                if a.is_empty() {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "LayerNorm requires rank >= 1 input".to_string() });
+                }
+                if *eps < 0.0 || !eps.is_finite() {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "LayerNorm eps must be non-negative and finite".to_string() });
+                }
+                Ok(vec![a.to_vec()])
+            }
+            Op::Relu | Op::Gelu | Op::Silu | Op::ScalarMul { .. } => {
+                if input_shapes.len() != 1 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("{} expects 1 input, got {}", self.name(), input_shapes.len()) });
+                }
                 Ok(vec![input_shapes[0].to_vec()])
+            }
+            Op::FusedAttentionBlock { num_heads, head_dim, hidden_dim, .. } => {
+                if input_shapes.is_empty() || input_shapes.len() > 2 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("FusedAttentionBlock expects 1 or 2 inputs, got {}", input_shapes.len()) });
+                }
+                if *num_heads == 0 || *head_dim == 0 || *hidden_dim == 0 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "FusedAttentionBlock dimensions must be > 0".to_string() });
+                }
+                if *num_heads * *head_dim != *hidden_dim {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("num_heads ({num_heads}) * head_dim ({head_dim}) != hidden_dim ({hidden_dim})") });
+                }
+                let a = input_shapes[0];
+                if a.is_empty() || last_dim(a) as usize != *hidden_dim {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("input last dim {} != hidden_dim {hidden_dim}", last_dim(a)) });
+                }
+                Ok(vec![a.to_vec()])
+            }
+            Op::FusedFfnBlock { hidden_dim, intermediate_dim, .. } => {
+                if input_shapes.is_empty() || input_shapes.len() > 2 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("FusedFfnBlock expects 1 or 2 inputs, got {}", input_shapes.len()) });
+                }
+                if *hidden_dim == 0 || *intermediate_dim == 0 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "FusedFfnBlock dimensions must be > 0".to_string() });
+                }
+                let a = input_shapes[0];
+                if a.is_empty() || last_dim(a) as usize != *hidden_dim {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("input last dim {} != hidden_dim {hidden_dim}", last_dim(a)) });
+                }
+                Ok(vec![a.to_vec()])
+            }
+            Op::FusedTransformerLayer { num_heads, head_dim, hidden_dim, intermediate_dim, .. } => {
+                if input_shapes.is_empty() || input_shapes.len() > 2 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("FusedTransformerLayer expects 1 or 2 inputs, got {}", input_shapes.len()) });
+                }
+                if *num_heads == 0 || *head_dim == 0 || *hidden_dim == 0 || *intermediate_dim == 0 {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: "FusedTransformerLayer dimensions must be > 0".to_string() });
+                }
+                if *num_heads * *head_dim != *hidden_dim {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("num_heads ({num_heads}) * head_dim ({head_dim}) != hidden_dim ({hidden_dim})") });
+                }
+                let a = input_shapes[0];
+                if a.is_empty() || last_dim(a) as usize != *hidden_dim {
+                    return Err(Error::ShapeMismatch { op_name: self.name().to_string(), reason: format!("input last dim {} != hidden_dim {hidden_dim}", last_dim(a)) });
+                }
+                Ok(vec![a.to_vec()])
             }
         }
     }

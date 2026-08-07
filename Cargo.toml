@@ -1,6 +1,6 @@
 [package]
 name = "mlgraph"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Santh <64453045+santhreal@users.noreply.github.com>"]

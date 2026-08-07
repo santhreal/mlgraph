@@ -164,3 +164,101 @@ fn test_linear_rank0_input_is_rejected_not_panicking() {
         "rank-0 Linear must error, got {result:?}"
     );
 }
+
+#[test]
+fn softmax_rejects_out_of_range_dimension() {
+    let shape = vec![2, 3];
+    let op_out_high = Op::Softmax { dim: 5 };
+    assert!(op_out_high.infer_shapes(&[&shape]).is_err());
+
+    let op_out_low = Op::Softmax { dim: -5 };
+    assert!(op_out_low.infer_shapes(&[&shape]).is_err());
+
+    let op_ok = Op::Softmax { dim: -1 };
+    let res = op_ok.infer_shapes(&[&shape]).unwrap();
+    assert_eq!(res[0], vec![2, 3]);
+}
+
+#[test]
+fn layernorm_rejects_negative_or_nan_eps_and_rank0() {
+    let shape = vec![2, 3];
+    let op_neg = Op::LayerNorm { eps: -1.0 };
+    assert!(op_neg.infer_shapes(&[&shape]).is_err());
+
+    let op_nan = Op::LayerNorm { eps: f32::NAN };
+    assert!(op_nan.infer_shapes(&[&shape]).is_err());
+
+    let op_ok = Op::LayerNorm { eps: 1e-5 };
+    let empty: Vec<usize> = vec![];
+    assert!(op_ok.infer_shapes(&[&empty]).is_err());
+}
+
+#[test]
+fn patchembed_rejects_channel_mismatch() {
+    let op = Op::PatchEmbed { patch_size: 16, in_channels: 3, embed_dim: 768 };
+    let bad_channels = vec![1, 4, 224, 224];
+    assert!(op.infer_shapes(&[&bad_channels]).is_err());
+
+    let good_channels = vec![1, 3, 224, 224];
+    let res = op.infer_shapes(&[&good_channels]).unwrap();
+    assert_eq!(res[0], vec![1, 197, 768]);
+}
+
+#[test]
+fn linear_rejects_zero_out_features_and_multiple_inputs() {
+    let shape = vec![2, 3];
+    let op_zero = Op::Linear { out_features: 0, bias: true };
+    assert!(op_zero.infer_shapes(&[&shape]).is_err());
+
+    let op_valid = Op::Linear { out_features: 10, bias: true };
+    assert!(op_valid.infer_shapes(&[&shape, &shape]).is_err());
+}
+
+#[test]
+fn unary_ops_reject_multiple_inputs() {
+    let shape = vec![2, 3];
+    assert!(Op::Relu.infer_shapes(&[&shape, &shape]).is_err());
+    assert!(Op::Gelu.infer_shapes(&[&shape, &shape]).is_err());
+    assert!(Op::Silu.infer_shapes(&[&shape, &shape]).is_err());
+    assert!(Op::ScalarMul { factor: 2.0 }.infer_shapes(&[&shape, &shape]).is_err());
+}
+
+#[test]
+fn fused_ops_reject_mismatched_and_zero_dimensions() {
+    let shape = vec![1, 197, 768];
+    let bad_heads = Op::FusedAttentionBlock { num_heads: 0, head_dim: 64, hidden_dim: 768, has_bias: true };
+    assert!(bad_heads.infer_shapes(&[&shape]).is_err());
+
+    let head_mismatch = Op::FusedAttentionBlock { num_heads: 12, head_dim: 64, hidden_dim: 512, has_bias: true };
+    assert!(head_mismatch.infer_shapes(&[&shape]).is_err());
+
+    let input_mismatch = Op::FusedAttentionBlock { num_heads: 12, head_dim: 64, hidden_dim: 768, has_bias: true };
+    let bad_shape = vec![1, 197, 512];
+    assert!(input_mismatch.infer_shapes(&[&bad_shape]).is_err());
+
+    let ffn_mismatch = Op::FusedFfnBlock { hidden_dim: 768, intermediate_dim: 3072, activation: Activation::Gelu, has_bias: true };
+    assert!(ffn_mismatch.infer_shapes(&[&bad_shape]).is_err());
+}
+
+#[test]
+fn build_vit_rejects_invalid_configurations() {
+    use mlgraph::models::vit::{build_vit, ViTConfig};
+
+    let mut cfg = ViTConfig::tiny();
+    cfg.patch_size = 0;
+    assert!(build_vit(&cfg).is_err());
+
+    let mut cfg2 = ViTConfig::tiny();
+    cfg2.num_heads = 0;
+    assert!(build_vit(&cfg2).is_err());
+
+    let mut cfg3 = ViTConfig::tiny();
+    cfg3.hidden_dim = 100;
+    cfg3.num_heads = 3;
+    assert!(build_vit(&cfg3).is_err());
+
+    let mut cfg4 = ViTConfig::tiny();
+    cfg4.image_size = 225;
+    cfg4.patch_size = 16;
+    assert!(build_vit(&cfg4).is_err());
+}

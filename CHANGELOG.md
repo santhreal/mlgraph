@@ -1,5 +1,19 @@
 # Changelog
 
+
+## [0.1.4] - 2026-08-07
+
+### Fixed
+- `Op::Softmax` shape inference now validates dimension bounds and returns `Error::ShapeMismatch` if out of range instead of silently returning input shape.
+- `Op::LayerNorm` shape inference now validates non-negative finite `eps` and requires rank >= 1.
+- `Op::PatchEmbed` shape inference now validates `in_channels` match against input tensor shape.
+- `Op::Linear` shape inference now requires `out_features > 0` and single input.
+- Unary operations (`Relu`, `Gelu`, `Silu`, `ScalarMul`) now strictly require single input tensor.
+- Fused operations (`FusedAttentionBlock`, `FusedFfnBlock`, `FusedTransformerLayer`) now validate non-zero parameters and matching input head/hidden dimensions.
+- `build_vit` in `src/models/vit.rs` now validates configuration parameters (`patch_size`, `num_heads`, divisibility) and returns `Error::InvalidGraph` instead of panicking on division by zero.
+
+### Added
+- Proving tests in `tests/adversarial/ops.rs` covering fail-closed shape inference and ViT config validation.
 ## [0.1.3] - 2026-08-07
 
 ### Fixed
